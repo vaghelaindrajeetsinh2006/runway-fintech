@@ -1,0 +1,60 @@
+import { ArrowDownRight, ArrowUpRight, BarChart3, Brain, CalendarDays, Flame, HeartPulse, Lightbulb, ShieldCheck, Sparkles, Target, TrendingUp, Wallet } from 'lucide-react';
+import { Badge, Card, PageHeading, ProgressBar } from '../components/ui';
+import { CategoryDonut, CategoryLegend, DailySpendBars, ForecastChart } from '../components/Charts';
+import { calculateMetrics, generateSmartAlerts, getGoalStatus } from '../lib/finance';
+import { inr } from '../lib/format';
+import { useFinanceStore } from '../store/useFinanceStore';
+
+export default function Insights() {
+  const store = useFinanceStore();
+  const metrics = calculateMetrics(store);
+  const alerts = generateSmartAlerts(store);
+  const expenses = store.expenses.filter((item) => item.day <= store.currentDay);
+  const byCategory = expenses.reduce<Record<string, number>>((map, item) => { map[item.category] = (map[item.category] ?? 0) + item.amount; return map; }, {});
+  const categoryRows = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
+  const biggestCategory = categoryRows[0];
+  const biggestLeak = [...expenses].sort((a, b) => b.amount - a.amount)[0];
+  const weekdaySpend = expenses.filter((item) => ![0, 6].includes(item.day % 7)).reduce((total, item) => total + item.amount, 0);
+  const weekendSpend = expenses.filter((item) => [0, 6].includes(item.day % 7)).reduce((total, item) => total + item.amount, 0);
+  const weekdayCount = Array.from({ length: store.currentDay }, (_, index) => index + 1).filter((day) => ![0, 6].includes(day % 7)).length || 1;
+  const weekendCount = Array.from({ length: store.currentDay }, (_, index) => index + 1).filter((day) => [0, 6].includes(day % 7)).length || 1;
+  const weekdayAverage = weekdaySpend / weekdayCount;
+  const weekendAverage = weekendSpend / weekendCount;
+  const personality = weekendAverage > weekdayAverage * 1.4 && weekendSpend > 0
+    ? { name: 'Weekend Splurger', detail: 'Weekends take a bigger bite. Give fun a mini-budget before Friday arrives.', emoji: '🎉' }
+    : store.subscriptions.filter((item) => item.active).length >= 3
+      ? { name: 'Subscription Collector', detail: 'Small monthly charges are teaming up. Keep the ones you actually use.', emoji: '📺' }
+      : metrics.avgDailySpend <= metrics.safeDailyAllowance
+        ? { name: 'Steady Sprinter', detail: 'Your pace is within the safe lane. Consistency is doing the heavy lifting.', emoji: '🏃' }
+        : { name: 'Treat-Yourself Strategist', detail: 'You like the good stuff. A quick Decision Lab check can keep treats from becoming leaks.', emoji: '🪩' };
+  const breakdown = [
+    { key: 'runway', label: 'Runway coverage', weight: '30%', value: metrics.healthBreakdown.runway, text: 'Can your money last as long as the month?' },
+    { key: 'pace', label: 'Spending pace', weight: '25%', value: metrics.healthBreakdown.pace, text: 'How your flexible spending compares with the safe daily allowance.' },
+    { key: 'savings', label: 'Savings progress', weight: '20%', value: metrics.healthBreakdown.savings, text: 'Are goals keeping up with their timeline?' },
+    { key: 'obligations', label: 'Obligation load', weight: '15%', value: metrics.healthBreakdown.obligations, text: 'How much breathing room remains after upcoming bills.' },
+    { key: 'buffer', label: 'Safety buffer', weight: '10%', value: metrics.healthBreakdown.buffer, text: 'How much of the starting budget still acts as a cushion.' },
+  ];
+
+  return <div className="space-y-6">
+    <PageHeading eyebrow="Insights" title="Your money has patterns." description="Spot the leaks, understand your pace and see what’s actually driving your financial health." action={<Badge tone={metrics.healthScore >= 70 ? 'green' : 'amber'}><HeartPulse size={13} /> {metrics.healthLabel} · {metrics.healthScore}/100</Badge>} />
+
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Card><div className="flex items-center gap-2 text-xs text-[var(--muted)]"><Wallet size={15} className="text-violet-500" /> Current balance</div><div className="mt-3 text-2xl font-black">{inr(metrics.balance)}</div><div className="mt-1 text-xs text-[var(--muted)]">{metrics.daysLeft} days still in the plan</div></Card><Card><div className="flex items-center gap-2 text-xs text-[var(--muted)]"><TrendingUp size={15} className="text-cyan-500" /> Forecast for Day 30</div><div className={`mt-3 text-2xl font-black ${metrics.projectedEndBalance < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>{inr(metrics.projectedEndBalance)}</div><div className="mt-1 text-xs text-[var(--muted)]">At your current spending pace</div></Card><Card><div className="flex items-center gap-2 text-xs text-[var(--muted)]"><Target size={15} className="text-emerald-500" /> Goal progress</div><div className="mt-3 text-2xl font-black">{store.goals.filter((goal) => getGoalStatus(goal, store) === 'Complete').length}<span className="ml-1 text-sm font-medium text-[var(--muted)]">complete</span></div><div className="mt-1 text-xs text-[var(--muted)]">{store.goals.filter((goal) => ['At risk', 'Off track'].includes(getGoalStatus(goal, store))).length} need attention</div></Card><Card><div className="flex items-center gap-2 text-xs text-[var(--muted)]"><Flame size={15} className="text-amber-500" /> Overspend streak</div><div className="mt-3 text-2xl font-black">{metrics.overspendStreak}<span className="ml-1 text-sm font-medium text-[var(--muted)]">day{metrics.overspendStreak === 1 ? '' : 's'}</span></div><div className="mt-1 text-xs text-[var(--muted)]">Days spending above current pace</div></Card></div>
+
+    <div className="grid gap-5 xl:grid-cols-[1.2fr_.8fr]">
+      <Card><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-[.15em] text-violet-500">Projected vs actual</div><h2 className="mt-1 text-lg font-bold">The month from today</h2><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Past days use the calculated current balance; future days model your spend pace and due obligations.</p></div><Badge tone={metrics.projectedEndBalance >= 0 ? 'green' : 'red'}>{metrics.projectedEndBalance >= 0 ? 'Room left' : 'Shortfall risk'}</Badge></div><div className="mt-4"><ForecastChart data={store} /></div></Card>
+      <Card><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-[.15em] text-emerald-500">Health score</div><h2 className="mt-1 text-lg font-bold">What makes up {metrics.healthScore}?</h2></div><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500"><ShieldCheck size={18} /></div></div><div className="mt-5 space-y-4">{breakdown.map((item) => <div key={item.key}><div className="mb-1.5 flex items-center justify-between gap-3"><span className="text-sm font-semibold">{item.label} <span className="text-[10px] font-medium text-[var(--muted)]">{item.weight}</span></span><span className="text-xs font-bold">{Math.round(item.value)}/100</span></div><ProgressBar value={item.value} label={`${item.label} health score`} tone={item.value < 45 ? 'red' : item.value < 70 ? 'amber' : 'gradient'} /><p className="mt-1.5 text-[11px] leading-4 text-[var(--muted)]">{item.text}</p></div>)}</div></Card>
+    </div>
+
+    <div className="grid gap-5 xl:grid-cols-[.8fr_1.2fr]">
+      <Card><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-[.15em] text-violet-500">Category breakdown</div><h2 className="mt-1 text-lg font-bold">What gets the biggest slice?</h2></div><BarChart3 size={18} className="text-violet-500" /></div><div className="mt-3 grid grid-cols-[.95fr_1.05fr] items-center gap-2"><CategoryDonut data={store} compact /><CategoryLegend data={store} /></div>{biggestCategory && <div className="mt-3 rounded-xl bg-[var(--soft)] p-3 text-xs leading-5 text-[var(--muted)]">Your top category is <strong className="text-[var(--text)]">{biggestCategory[0]}</strong> at {inr(biggestCategory[1])} so far.</div>}</Card>
+      <Card><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-[.15em] text-cyan-500">Daily spend pattern</div><h2 className="mt-1 text-lg font-bold">Where the little leaks add up.</h2><p className="mt-1 text-xs text-[var(--muted)]">Flexible and unexpected expenses, grouped by simulated day.</p></div><CalendarDays size={18} className="text-cyan-500" /></div><div className="mt-3"><DailySpendBars data={store} /></div><div className="mt-3 grid grid-cols-2 gap-3"><div className="rounded-xl bg-[var(--soft)] p-3"><div className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]"><ArrowUpRight size={13} /> Weekday average</div><div className="mt-1 text-lg font-bold">{inr(weekdayAverage)}</div></div><div className="rounded-xl bg-[var(--soft)] p-3"><div className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]"><ArrowDownRight size={13} /> Weekend average</div><div className="mt-1 text-lg font-bold">{inr(weekendAverage)}</div></div></div></Card>
+    </div>
+
+    <div className="grid gap-5 xl:grid-cols-[.8fr_1.2fr]">
+      <Card className="overflow-hidden bg-gradient-to-br from-violet-500/[.11] to-cyan-400/[.04]"><div className="flex items-start gap-4"><div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--panel)] text-3xl">{personality.emoji}</div><div><div className="text-xs font-bold uppercase tracking-[.15em] text-violet-500">Money personality</div><h2 className="mt-1 text-xl font-bold">{personality.name}</h2><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{personality.detail}</p></div></div><div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-4"><div className="flex items-center gap-2 text-sm font-bold"><Brain size={16} className="text-violet-500" /> Not a label. Just a pattern.</div><p className="mt-1 text-xs leading-5 text-[var(--muted)]">This is computed from your spending distribution, weekend/weekday averages and active subscriptions. It updates as your data changes.</p></div></Card>
+      <Card><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-[.15em] text-amber-500">Smart alerts</div><h2 className="mt-1 text-lg font-bold">What deserves attention right now?</h2></div><Lightbulb size={18} className="text-amber-500" /></div><div className="mt-4 space-y-3">{alerts.map((alert) => <div key={alert.id} className="flex gap-3 rounded-xl border border-[var(--border)] p-3"><div className={`mt-0.5 ${alert.tone === 'red' ? 'text-rose-500' : alert.tone === 'amber' ? 'text-amber-500' : alert.tone === 'green' ? 'text-emerald-500' : 'text-sky-500'}`}><Sparkles size={17} /></div><div><div className="text-sm font-semibold">{alert.title}</div><p className="mt-1 text-xs leading-5 text-[var(--muted)]">{alert.detail}</p></div></div>)}</div><div className="mt-4 border-t border-[var(--border)] pt-4"><div className="text-xs font-bold uppercase tracking-wider text-[var(--muted)]">Two things to improve</div><div className="mt-2 space-y-2">{metrics.topImprovements.map((item) => <div key={item} className="flex items-start gap-2 text-sm leading-5"><span className="mt-1 text-violet-500">•</span><span>{item}</span></div>)}</div></div></Card>
+    </div>
+
+    {biggestLeak && <Card><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500/10 text-rose-500"><ArrowDownRight size={18} /></div><div><div className="text-xs font-bold uppercase tracking-wider text-rose-500">Largest single spend</div><div className="mt-1 font-semibold">{biggestLeak.title} · {biggestLeak.category}</div><div className="mt-1 text-xs text-[var(--muted)]">Day {biggestLeak.day} · {biggestLeak.type === 'unexpected' ? 'Unexpected expense' : 'Flexible spend'}</div></div></div><div className="text-2xl font-black">{inr(biggestLeak.amount)}</div></div></Card>}
+  </div>;
+}

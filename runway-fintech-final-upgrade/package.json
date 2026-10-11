@@ -1,0 +1,48 @@
+{
+  "name": "runway-personal-finance",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "test": "node scripts/run-tests.mjs",
+    "verify": "npm run lint && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "framer-motion": "^11.18.2",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.18.4",
+    "recharts": "^2.15.0",
+    "tailwindcss": "^4.3.3",
+    "zustand": "^5.0.3",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.7",
+    "postcss": "^8.5.6"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/node": "^22.10.2",
+    "@eslint/js": "^9.28.0",
+    "eslint": "^9.28.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "typescript-eslint": "^8.34.1",
+    "@tailwindcss/postcss": "^4.3.3"
+  },
+  "description": "A private 30-day personal finance simulator with interconnected forecasts and decision previews.",
+  "keywords": [
+    "personal-finance",
+    "budgeting",
+    "finance-simulation",
+    "react",
+    "typescript",
+    "tailwindcss",
+    "hackathon"
+  ]
+}
