@@ -1,7 +1,7 @@
 import { ArrowDownRight, ArrowUpRight, BarChart3, Brain, CalendarDays, Flame, HeartPulse, Lightbulb, ShieldCheck, Sparkles, Target, TrendingUp, Wallet } from 'lucide-react';
 import { Badge, Card, PageHeading, ProgressBar } from '../components/ui';
 import { CategoryDonut, CategoryLegend, DailySpendBars, ForecastChart } from '../components/Charts';
-import { calculateMetrics, generateSmartAlerts, getGoalSavedAmount, getGoalStatus } from '../lib/finance';
+import { calculateMetrics, generateSmartAlerts, getGoalStatus } from '../lib/finance';
 import { inr } from '../lib/format';
 import { useFinanceStore } from '../store/useFinanceStore';
 
@@ -42,7 +42,7 @@ export default function Insights() {
 
     <div className="grid gap-5 xl:grid-cols-[1.2fr_.8fr]">
       <Card><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-[.15em] text-violet-500">Projected vs actual</div><h2 className="mt-1 text-lg font-bold">The month from today</h2><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Past days use the calculated current balance; future days model your spend pace and due obligations.</p></div><Badge tone={metrics.projectedEndBalance >= 0 ? 'green' : 'red'}>{metrics.projectedEndBalance >= 0 ? 'Room left' : 'Shortfall risk'}</Badge></div><div className="mt-4"><ForecastChart data={store} /></div></Card>
-      <Card><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-[.15em] text-emerald-500">Health score</div><h2 className="mt-1 text-lg font-bold">What makes up {metrics.healthScore}?</h2></div><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500"><ShieldCheck size={18} /></div></div><div className="mt-5 space-y-4">{breakdown.map((item) => <div key={item.key}><div className="mb-1.5 flex items-center justify-between gap-3"><span className="text-sm font-semibold">{item.label} <span className="text-[10px] font-medium text-[var(--muted)]">{item.weight}</span></span><span className="text-xs font-bold">{Math.round(item.value)}/100</span></div><ProgressBar value={item.value} tone={item.value < 45 ? 'red' : item.value < 70 ? 'amber' : 'gradient'} /><p className="mt-1.5 text-[11px] leading-4 text-[var(--muted)]">{item.text}</p></div>)}</div></Card>
+      <Card><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-[.15em] text-emerald-500">Health score</div><h2 className="mt-1 text-lg font-bold">What makes up {metrics.healthScore}?</h2></div><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500"><ShieldCheck size={18} /></div></div><div className="mt-5 space-y-4">{breakdown.map((item) => <div key={item.key}><div className="mb-1.5 flex items-center justify-between gap-3"><span className="text-sm font-semibold">{item.label} <span className="text-[10px] font-medium text-[var(--muted)]">{item.weight}</span></span><span className="text-xs font-bold">{Math.round(item.value)}/100</span></div><ProgressBar value={item.value} label={`${item.label} health score`} tone={item.value < 45 ? 'red' : item.value < 70 ? 'amber' : 'gradient'} /><p className="mt-1.5 text-[11px] leading-4 text-[var(--muted)]">{item.text}</p></div>)}</div></Card>
     </div>
 
     <div className="grid gap-5 xl:grid-cols-[.8fr_1.2fr]">

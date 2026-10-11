@@ -17,10 +17,23 @@ export const clamp = (n: number, min: number, max: number): number => Math.min(m
 export const makeId = (prefix = 'item'): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+
+export const sanitizeText = (value: unknown, maxLength = 64): string => {
+  if (typeof value !== 'string' || !Number.isInteger(maxLength) || maxLength < 1) return '';
+  const normalized = value.normalize('NFKC');
+  const cleaned = Array.from(normalized, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) ? ' ' : character;
+  }).join('');
+
+  return cleaned.replace(/\s+/g, ' ').trim().slice(0, maxLength);
+};
+
 export const safePositiveAmount = (raw: string | number): number | null => {
   const amount = typeof raw === 'number' ? raw : Number(raw);
   if (!Number.isFinite(amount) || amount <= 0 || amount > 10_000_000) return null;
-  return Math.round(amount * 100) / 100;
+  const rounded = Math.round((amount + Number.EPSILON) * 100) / 100;
+  return rounded > 0 ? rounded : null;
 };
 
 export const dayLabel = (day: number): string => `Day ${day}`;

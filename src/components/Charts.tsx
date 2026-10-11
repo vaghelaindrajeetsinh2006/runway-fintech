@@ -6,9 +6,22 @@ import { inr } from '../lib/format';
 const chartColors = ['#8b5cf6', '#22d3ee', '#f59e0b', '#fb7185', '#34d399', '#60a5fa', '#c084fc', '#94a3b8'];
 const axisColor = 'var(--muted)';
 
-const MoneyTooltip = ({ active, payload, label }: any) => {
+type MoneyTooltipItem = {
+  dataKey?: string | number;
+  name?: string | number;
+  value?: number | string;
+  color?: string;
+};
+
+type MoneyTooltipProps = {
+  active?: boolean;
+  payload?: ReadonlyArray<MoneyTooltipItem>;
+  label?: string | number;
+};
+
+const MoneyTooltip = ({ active, payload, label }: MoneyTooltipProps) => {
   if (!active || !payload?.length) return null;
-  return <div className="chart-tooltip"><div className="text-xs text-[var(--muted)]">{label}</div>{payload.map((item: any) => <div key={item.dataKey} className="mt-1 text-sm font-semibold" style={{ color: item.color }}>{item.name}: {inr(Number(item.value))}</div>)}</div>;
+  return <div className="chart-tooltip" aria-live="polite"><div className="text-xs text-[var(--muted)]">{label}</div>{payload.map((item, index) => <div key={`${item.dataKey ?? item.name ?? 'value'}-${index}`} className="mt-1 text-sm font-semibold" style={{ color: item.color }}>{item.name}: {inr(Number(item.value))}</div>)}</div>;
 };
 
 export function ForecastChart({ data, compare, compact = false }: { data: FinanceData; compare?: FinanceData; compact?: boolean }) {

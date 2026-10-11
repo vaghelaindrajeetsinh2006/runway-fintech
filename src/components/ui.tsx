@@ -7,7 +7,7 @@ export function Card({ children, className = '', onClick }: { children: ReactNod
   return <section onClick={onClick} className={`surface-card ${className}`}>{children}</section>;
 }
 
-export function Button({ children, variant = 'primary', size = 'md', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline'; size?: 'sm' | 'md' | 'lg' }) {
+export function Button({ children, variant = 'primary', size = 'md', type = 'button', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline'; size?: 'sm' | 'md' | 'lg' }) {
   const base = 'inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl font-semibold transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] disabled:cursor-not-allowed disabled:opacity-45';
   const variants = {
     primary: 'bg-gradient-to-r from-violet-600 to-indigo-500 text-white shadow-lg shadow-violet-900/20 hover:brightness-110 active:scale-[.98]',
@@ -17,11 +17,11 @@ export function Button({ children, variant = 'primary', size = 'md', className =
     outline: 'border border-[var(--border)] bg-transparent text-[var(--text)] hover:border-violet-400/60 hover:bg-violet-500/5',
   };
   const sizes = { sm: 'px-3 py-2 text-xs', md: 'px-4 py-2.5 text-sm', lg: 'px-5 py-3 text-sm' };
-  return <button className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...props}>{children}</button>;
+  return <button type={type} className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...props}>{children}</button>;
 }
 
-export function IconButton({ label, children, className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
-  return <button aria-label={label} title={label} className={`inline-flex h-11 w-11 items-center justify-center rounded-xl text-[var(--muted)] transition hover:bg-[var(--soft)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${className}`} {...props}>{children}</button>;
+export function IconButton({ label, children, type = 'button', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
+  return <button type={type} aria-label={label} title={label} className={`inline-flex h-11 w-11 items-center justify-center rounded-xl text-[var(--muted)] transition hover:bg-[var(--soft)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${className}`} {...props}>{children}</button>;
 }
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
@@ -52,7 +52,7 @@ export function Badge({ children, tone = 'neutral', className = '' }: { children
   return <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${tones[tone]} ${className}`}>{children}</span>;
 }
 
-export function ProgressBar({ value, tone = 'gradient', className = '' }: { value: number; tone?: 'gradient' | 'green' | 'amber' | 'red'; className?: string }) {
+export function ProgressBar({ value, tone = 'gradient', className = '', label = 'Progress' }: { value: number; tone?: 'gradient' | 'green' | 'amber' | 'red'; className?: string; label?: string }) {
   const clamped = Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0));
   const colors = {
     gradient: 'from-violet-500 to-cyan-400',
@@ -60,7 +60,7 @@ export function ProgressBar({ value, tone = 'gradient', className = '' }: { valu
     amber: 'from-amber-500 to-orange-400',
     red: 'from-rose-500 to-pink-400',
   };
-  return <div className={`h-2 overflow-hidden rounded-full bg-[var(--soft)] ${className}`} role="progressbar" aria-valuenow={Math.round(clamped)} aria-valuemin={0} aria-valuemax={100}>
+  return <div className={`h-2 overflow-hidden rounded-full bg-[var(--soft)] ${className}`} role="progressbar" aria-label={label} aria-valuetext={`${Math.round(clamped)}%`} aria-valuenow={Math.round(clamped)} aria-valuemin={0} aria-valuemax={100}>
     <motion.div initial={false} animate={{ width: `${clamped}%` }} transition={{ duration: 0.55, ease: 'easeOut' }} className={`h-full rounded-full bg-gradient-to-r ${colors[tone]}`} />
   </div>;
 }
@@ -87,31 +87,58 @@ export function EmptyState({ icon, title, description, action }: { icon: ReactNo
 
 export function Modal({ open, title, description, children, onClose, wide = false }: { open: boolean; title: string; description?: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
   useEffect(() => {
     if (!open) return;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeRef.current?.focus();
+
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-      if (event.key === 'Tab') {
-        const dialog = document.getElementById('runway-modal-dialog');
-        if (!dialog) return;
-        const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]'));
-        if (!focusable.length) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const dialog = document.getElementById('runway-modal-dialog');
+      if (!dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => !element.hasAttribute('hidden') && element.getAttribute('aria-hidden') !== 'true');
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
       }
     };
+
     document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, [open, onClose]);
+    return () => {
+      document.removeEventListener('keydown', handleKey);
+      const previous = previousFocusRef.current;
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [open]);
+
   if (!open) return null;
   return <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/65 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <motion.div id="runway-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="runway-modal-title" aria-describedby={description ? 'runway-modal-description' : undefined} initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16 }} className={`max-h-[92vh] w-full overflow-y-auto rounded-t-3xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-2xl sm:rounded-3xl sm:p-6 ${wide ? 'max-w-3xl' : 'max-w-lg'}`}>
+    <motion.div id="runway-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="runway-modal-title" aria-describedby={description ? 'runway-modal-description' : undefined} tabIndex={-1} initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16 }} className={`max-h-[92vh] w-full overflow-y-auto rounded-t-3xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-2xl sm:rounded-3xl sm:p-6 ${wide ? 'max-w-3xl' : 'max-w-lg'}`}>
       <div className="mb-5 flex items-start justify-between gap-4">
         <div><h2 id="runway-modal-title" className="text-lg font-bold text-[var(--text)]">{title}</h2>{description && <p id="runway-modal-description" className="mt-1 text-sm leading-6 text-[var(--muted)]">{description}</p>}</div>
-        <button ref={closeRef} onClick={onClose} aria-label="Close dialog" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--muted)] hover:bg-[var(--soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"><X size={18} /></button>
+        <button ref={closeRef} type="button" onClick={onClose} aria-label="Close dialog" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--muted)] hover:bg-[var(--soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"><X size={18} /></button>
       </div>
       {children}
     </motion.div>
@@ -130,7 +157,7 @@ export function ToastNotice() {
   }, [message, clear]);
   if (!message) return null;
   const hasUndo = Boolean(undoEntry);
-  return <motion.div initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-24 left-1/2 z-[100] flex w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3 shadow-2xl sm:bottom-6">
+  return <motion.div role="status" aria-live="polite" aria-atomic="true" initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-24 left-1/2 z-[100] flex w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3 shadow-2xl sm:bottom-6">
     <div className="mt-0.5 text-emerald-500"><CheckCircle2 size={19} /></div>
     <div className="min-w-0 flex-1 text-sm text-[var(--text)]">{message}</div>
     {hasUndo && <button onClick={undo} className="rounded-lg px-2 py-1 text-xs font-bold text-violet-500 hover:bg-violet-500/10">Undo</button>}

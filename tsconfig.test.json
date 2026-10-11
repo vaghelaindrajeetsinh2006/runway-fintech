@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "rootDir": "src",
+    "outDir": ".test-build",
+    "types": []
+  },
+  "include": [
+    "src/lib/finance.ts",
+    "src/lib/format.ts",
+    "src/lib/seed.ts",
+    "src/lib/sanitize.ts",
+    "src/types/index.ts"
+  ]
+}

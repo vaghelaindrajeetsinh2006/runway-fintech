@@ -1,10 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Activity, AlertTriangle, ArrowDownLeft, ArrowRight, ArrowUpRight, CalendarDays,
-  Check, ChevronRight, CircleDollarSign, Clock3, Coffee, Compass, CreditCard,
-  HeartPulse, Lightbulb, Plus, ShieldCheck, Sparkles, TrendingDown, Wallet, Zap,
+  Activity, AlertTriangle, ArrowRight, ArrowUpRight, CalendarDays,
+  Check, ChevronRight, Clock3, CreditCard,
+  HeartPulse, Lightbulb, Plus, Sparkles, Wallet, Zap,
 } from 'lucide-react';
 import { Button, Badge, Card, Field, Input, InlineNotice, Modal, PageHeading, ProgressBar, Select } from '../components/ui';
 import { ForecastChart, CategoryDonut, CategoryLegend } from '../components/Charts';
@@ -63,7 +62,7 @@ function QuickAddModal({ open, onClose }: { open: boolean; onClose: () => void }
     setTitle(''); setAmount(''); setError(''); setConfirmOverspend(false); onClose();
   };
   return <Modal open={open} onClose={onClose} title="Quick money move" description="Log what just happened. Your dashboard recalculates everywhere.">
-    <div className="mb-4 flex gap-2 rounded-xl bg-[var(--soft)] p-1"><button onClick={() => setType('expense')} className={`min-h-10 flex-1 rounded-lg text-sm font-semibold ${type === 'expense' ? 'bg-[var(--panel)] text-[var(--text)] shadow-sm' : 'text-[var(--muted)]'}`}>Expense</button><button onClick={() => setType('income')} className={`min-h-10 flex-1 rounded-lg text-sm font-semibold ${type === 'income' ? 'bg-[var(--panel)] text-[var(--text)] shadow-sm' : 'text-[var(--muted)]'}`}>Income</button></div>
+    <div className="mb-4 flex gap-2 rounded-xl bg-[var(--soft)] p-1"><button type="button" aria-pressed={type === 'expense'} onClick={() => setType('expense')} className={`min-h-10 flex-1 rounded-lg text-sm font-semibold ${type === 'expense' ? 'bg-[var(--panel)] text-[var(--text)] shadow-sm' : 'text-[var(--muted)]'}`}>Expense</button><button type="button" aria-pressed={type === 'income'} onClick={() => setType('income')} className={`min-h-10 flex-1 rounded-lg text-sm font-semibold ${type === 'income' ? 'bg-[var(--panel)] text-[var(--text)] shadow-sm' : 'text-[var(--muted)]'}`}>Income</button></div>
     <div className="space-y-4"><Field label="What was it?"><Input value={title} onChange={(event) => { setTitle(event.target.value); setError(''); }} placeholder={type === 'expense' ? 'e.g. Lunch with friends' : 'e.g. Freelance payment'} maxLength={64} /></Field><Field label="Amount (₹)"><Input type="number" min="1" max="10000000" inputMode="decimal" value={amount} onChange={(event) => { setAmount(event.target.value); setError(''); setConfirmOverspend(false); }} placeholder="0" /></Field>{type === 'expense' && <Field label="Category"><Select value={category} onChange={(event) => setCategory(event.target.value as ExpenseCategory)}>{categories.map((item) => <option key={item} value={item}>{categoryEmoji[item]} {item}</option>)}</Select></Field>}
       {error && <InlineNotice tone={confirmOverspend ? 'warning' : 'info'}>{error}</InlineNotice>}
       <div className="flex gap-2"><Button variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button><Button className="flex-1" onClick={submit}>{confirmOverspend ? 'Confirm anyway' : 'Save transaction'} <Check size={16} /></Button></div>
@@ -76,7 +75,7 @@ function LifeHappensCard() {
   const [event, setEvent] = useState<(typeof surpriseEvents)[number] | null>(null);
   const data = store;
   const beforeMetrics = calculateMetrics(data);
-  const preview = useMemo(() => event ? applyDecisionDraft(data, { type: 'unexpected_expense', title: event.title, amount: event.amount, category: event.category }) : null, [data.currentDay, data.expenses, data.commitments, data.subscriptions, data.goals, event]);
+  const preview = event ? applyDecisionDraft(data, { type: 'unexpected_expense', title: event.title, amount: event.amount, category: event.category }) : null;
   const afterMetrics = preview?.data ? calculateMetrics(preview.data) : null;
   const pickEvent = () => {
     const choices = surpriseEvents.filter((item) => item.amount <= Math.max(beforeMetrics.balance + 1500, 500));
@@ -141,7 +140,7 @@ export default function Dashboard() {
           { label: 'Runway', value: metrics.healthBreakdown.runway, weight: '30%' },
           { label: 'Spending pace', value: metrics.healthBreakdown.pace, weight: '25%' },
           { label: 'Savings progress', value: metrics.healthBreakdown.savings, weight: '20%' },
-        ].map((item) => <div key={item.label}><div className="mb-1.5 flex justify-between text-xs"><span className="text-[var(--muted)]">{item.label}</span><span className="font-semibold">{Math.round(item.value)}% <span className="text-[var(--muted)]">· {item.weight}</span></span></div><ProgressBar value={item.value} /></div>)}</div>
+        ].map((item) => <div key={item.label}><div className="mb-1.5 flex justify-between text-xs"><span className="text-[var(--muted)]">{item.label}</span><span className="font-semibold">{Math.round(item.value)}% <span className="text-[var(--muted)]">· {item.weight}</span></span></div><ProgressBar value={item.value} label={`${item.label} health score`} /></div>)}</div>
         <Link to="/insights" className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-violet-500 hover:text-violet-400">See health breakdown <ArrowRight size={15} /></Link>
       </Card>
     </div>
@@ -178,7 +177,7 @@ export default function Dashboard() {
       </Card>
       <Card>
         <div className="flex items-center justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-[.15em] text-[var(--muted)]">Goals in progress</div><h2 className="mt-1 text-lg font-bold">Keep future-you funded</h2></div><Link to="/goals" className="text-xs font-bold text-violet-500">All goals <ArrowRight size={14} className="ml-1 inline" /></Link></div>
-        {store.goals.length ? <div className="mt-4 space-y-5">{store.goals.slice(0, 3).map((goal) => { const saved = getGoalSavedAmount(goal, store); const pct = Math.min(100, (saved / goal.targetAmount) * 100); const status = getGoalStatus(goal, store); return <div key={goal.id}><div className="mb-2 flex items-center justify-between gap-3"><div className="min-w-0"><div className="truncate text-sm font-semibold">{goal.title}</div><div className="mt-0.5 text-[11px] text-[var(--muted)]">{inr(saved)} of {inr(goal.targetAmount)}</div></div><Badge tone={status === 'Complete' || status === 'On track' ? 'green' : status === 'At risk' ? 'amber' : 'red'}>{status}</Badge></div><ProgressBar value={pct} tone={status === 'Off track' ? 'red' : status === 'At risk' ? 'amber' : 'gradient'} /><div className="mt-1.5 text-right text-[10px] text-[var(--muted)]">{Math.round(pct)}% saved · Day {goal.deadlineDay} deadline</div></div>; })}</div> : <div className="py-8 text-center text-sm text-[var(--muted)]">No goals yet. Give your savings a name and a finish line.</div>}
+        {store.goals.length ? <div className="mt-4 space-y-5">{store.goals.slice(0, 3).map((goal) => { const saved = getGoalSavedAmount(goal, store); const pct = Math.min(100, (saved / goal.targetAmount) * 100); const status = getGoalStatus(goal, store); return <div key={goal.id}><div className="mb-2 flex items-center justify-between gap-3"><div className="min-w-0"><div className="truncate text-sm font-semibold">{goal.title}</div><div className="mt-0.5 text-[11px] text-[var(--muted)]">{inr(saved)} of {inr(goal.targetAmount)}</div></div><Badge tone={status === 'Complete' || status === 'On track' ? 'green' : status === 'At risk' ? 'amber' : 'red'}>{status}</Badge></div><ProgressBar value={pct} label={`${goal.title} savings progress`} tone={status === 'Off track' ? 'red' : status === 'At risk' ? 'amber' : 'gradient'} /><div className="mt-1.5 text-right text-[10px] text-[var(--muted)]">{Math.round(pct)}% saved · Day {goal.deadlineDay} deadline</div></div>; })}</div> : <div className="py-8 text-center text-sm text-[var(--muted)]">No goals yet. Give your savings a name and a finish line.</div>}
       </Card>
     </div>
 

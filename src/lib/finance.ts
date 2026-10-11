@@ -1,6 +1,7 @@
 import type {
   Commitment,
   DecisionDraft,
+  ExpenseCategory,
   FinanceData,
   FinanceMetrics,
   Goal,
@@ -8,7 +9,7 @@ import type {
   HealthLabel,
   RiskLevel,
 } from '../types';
-import { clamp, makeId } from './format';
+import { clamp, makeId, safePositiveAmount, sanitizeText } from './format';
 
 const sum = (values: number[]): number => values.reduce((total, value) => total + value, 0);
 
@@ -73,7 +74,7 @@ export const calculateGoalReserve = (state: FinanceData, balance = calculateBala
 const getAverageDailySpend = (state: FinanceData, allowance: number): number => {
   const elapsed = Math.max(1, state.currentDay - state.profile.startDay + 1);
   const spent = sum(state.expenses
-    .filter((item) => item.day <= state.currentDay && !item.title.endsWith(' · daily') && (item.type === 'discretionary' || item.type === 'unexpected'))
+    .filter((item) => item.day <= state.currentDay && !item.title.endsWith(' · daily') && !item.title.endsWith(' · weekly') && (item.type === 'discretionary' || item.type === 'unexpected'))
     .map((item) => item.amount));
   const observedAverage = spent / elapsed;
   // In the first few days the sample is noisy. Blend real spend with the safe allowance.
@@ -141,10 +142,27 @@ const getHealthLabel = (score: number): HealthLabel => {
 export const getGoalStatus = (goal: Goal, state: FinanceData): GoalStatus => {
   const saved = getGoalSavedAmount(goal, state);
   if (saved >= goal.targetAmount) return 'Complete';
+
   const expectedProgress = clamp(state.currentDay / Math.max(1, goal.deadlineDay), 0, 1);
   const actualProgress = saved / Math.max(1, goal.targetAmount);
-  if (actualProgress < expectedProgress * 0.65) return 'Off track';
-  if (actualProgress < expectedProgress * 0.9) return 'At risk';
+  const remaining = Math.max(0, goal.targetAmount - saved);
+  const daysUntilDeadline = Math.max(1, goal.deadlineDay - state.currentDay + 1);
+  const requiredDaily = remaining / daysUntilDeadline;
+  const balance = calculateBalance(state);
+  const reservedBills = sum(getUpcomingItems(state)
+    .filter((item) => item.day <= goal.deadlineDay)
+    .map((item) => item.amount));
+  const spendableAfterBills = Math.max(0, balance - reservedBills);
+  const cashShortfall = remaining > spendableAfterBills;
+
+  // Status reacts both to progress already made and to whether the remaining
+  // target is still plausible after protecting known bills from the same cash.
+  if (actualProgress < expectedProgress * 0.65 || cashShortfall || requiredDaily > Math.max(1, spendableAfterBills / daysUntilDeadline) * 1.5) {
+    return 'Off track';
+  }
+  if (actualProgress < expectedProgress * 0.9 || requiredDaily > Math.max(1, spendableAfterBills / daysUntilDeadline)) {
+    return 'At risk';
+  }
   return 'On track';
 };
 
@@ -267,26 +285,39 @@ export const applyDecisionDraft = (source: FinanceData, draft: DecisionDraft): {
     goalContributions: [...source.goalContributions],
     history: [...source.history],
   };
-  const wantsAmount = ['one_time_purchase', 'new_subscription', 'recurring_habit', 'extra_income', 'goal_contribution', 'unexpected_expense'].includes(draft.type);
-  const wantsTitle = ['one_time_purchase', 'new_subscription', 'recurring_habit', 'extra_income'].includes(draft.type);
-  if (wantsTitle && !draft.title.trim()) return { error: 'Add a short name for this decision.' };
-  if (wantsAmount && (!Number.isFinite(draft.amount) || draft.amount <= 0 || draft.amount > 10_000_000)) {
-    return { error: 'Enter an amount greater than ₹0 and less than ₹1,00,00,000.' };
+  const wantsAmount = ['one_time_purchase', 'new_subscription', 'recurring_habit', 'weekly_habit', 'extra_income', 'goal_contribution', 'unexpected_expense'].includes(draft.type);
+  const wantsTitle = ['one_time_purchase', 'new_subscription', 'recurring_habit', 'weekly_habit', 'extra_income'].includes(draft.type);
+  const title = sanitizeText((draft as { title?: unknown }).title, 64);
+  const normalizedAmount = wantsAmount ? safePositiveAmount(draft.amount) : 0;
+  if (wantsTitle && !title) return { error: 'Add a short name for this decision.' };
+  if (wantsAmount && normalizedAmount === null) {
+    return { error: 'Enter an amount greater than ₹0 and no more than ₹1,00,00,000.' };
   }
-  const title = draft.title.trim();
+  const amount = normalizedAmount ?? 0;
+  const categories: ExpenseCategory[] = ['Food', 'Travel', 'Shopping', 'Entertainment', 'Bills', 'Health', 'Education', 'Other'];
+  const category = categories.includes(draft.category) ? draft.category : 'Other';
   const addExpense = (day: number, type: 'discretionary' | 'unexpected', expenseTitle = title) => {
     data.expenses.push({
-      id: makeId('expense'), title: expenseTitle || 'Planned spend', amount: draft.amount,
-      category: draft.category || 'Other', day: clamp(day, 1, data.profile.totalDays), type,
+      id: makeId('expense'), title: sanitizeText(expenseTitle, 64) || 'Planned spend', amount,
+      category, day: clamp(Math.round(day), 1, data.profile.totalDays), type,
     });
   };
 
   switch (draft.type) {
-    case 'one_time_purchase':
-      addExpense(draft.expenseDay ?? data.currentDay, 'discretionary');
+    case 'one_time_purchase': {
+      const expenseDay = draft.expenseDay ?? data.currentDay;
+      if (!Number.isInteger(expenseDay) || expenseDay < data.currentDay || expenseDay > data.profile.totalDays) {
+        return { error: `Choose a day between Day ${data.currentDay} and Day ${data.profile.totalDays}.` };
+      }
+      addExpense(expenseDay, 'discretionary');
       return { data, message: `${title || 'Purchase'} added to your plan.` };
+    }
     case 'unexpected_expense': {
-      addExpense(draft.expenseDay ?? data.currentDay, 'unexpected', title || 'Unexpected expense');
+      const expenseDay = draft.expenseDay ?? data.currentDay;
+      if (!Number.isInteger(expenseDay) || expenseDay < data.currentDay || expenseDay > data.profile.totalDays) {
+        return { error: `Choose a day between Day ${data.currentDay} and Day ${data.profile.totalDays}.` };
+      }
+      addExpense(expenseDay, 'unexpected', title || 'Unexpected expense');
       if (draft.targetId) {
         const subscription = data.subscriptions.find((item) => item.id === draft.targetId);
         if (subscription?.active) subscription.active = false;
@@ -296,9 +327,13 @@ export const applyDecisionDraft = (source: FinanceData, draft: DecisionDraft): {
     case 'new_subscription': {
       if (data.currentDay >= data.profile.totalDays) return { error: 'There are no days left in this simulation for a new subscription bill.' };
       if (!title) return { error: 'Give the subscription a name.' };
+      const billingDay = draft.billingDay ?? data.currentDay + 1;
+      if (!Number.isInteger(billingDay) || billingDay <= data.currentDay || billingDay > data.profile.totalDays) {
+        return { error: `Choose a first billing day between Day ${data.currentDay + 1} and Day ${data.profile.totalDays}.` };
+      }
       data.subscriptions.push({
-        id: makeId('subscription'), name: title, amount: draft.amount,
-        billingDay: clamp(draft.billingDay ?? data.currentDay + 1, data.currentDay + 1, data.profile.totalDays), active: true,
+        id: makeId('subscription'), name: title, amount,
+        billingDay, active: true,
       });
       return { data, message: `${title} added. Its bill is now part of your forecast.` };
     }
@@ -306,6 +341,11 @@ export const applyDecisionDraft = (source: FinanceData, draft: DecisionDraft): {
       if (!title) return { error: 'Name the recurring habit.' };
       for (let day = data.currentDay; day <= data.profile.totalDays; day += 1) addExpense(day, 'discretionary', `${title} · daily`);
       return { data, message: `${title} is now modelled daily through Day ${data.profile.totalDays}.` };
+    }
+    case 'weekly_habit': {
+      if (!title) return { error: 'Name the weekly habit.' };
+      for (let day = data.currentDay; day <= data.profile.totalDays; day += 7) addExpense(day, 'discretionary', `${title} · weekly`);
+      return { data, message: `${title} is now modelled every 7 days through Day ${data.profile.totalDays}.` };
     }
     case 'cancel_subscription': {
       const item = data.subscriptions.find((subscription) => subscription.id === draft.targetId);
@@ -315,21 +355,36 @@ export const applyDecisionDraft = (source: FinanceData, draft: DecisionDraft): {
       return { data, message: `${item.name} paused. Future charges are removed from the forecast.` };
     }
     case 'extra_income':
-      data.incomes.push({ id: makeId('income'), title: title || 'Extra income', amount: draft.amount, day: data.currentDay });
-      return { data, message: `${Math.round(draft.amount)} added as income.` };
+      data.incomes.push({ id: makeId('income'), title: title || 'Extra income', amount, day: data.currentDay });
+      return { data, message: `${Math.round(amount)} added as income.` };
     case 'goal_contribution': {
       const goal = data.goals.find((item) => item.id === draft.targetId);
       if (!goal) return { error: 'Choose a savings goal.' };
-      if (draft.amount > Math.max(0, calculateBalance(data))) return { error: 'That contribution is larger than your current balance.' };
-      data.goalContributions.push({ id: makeId('contribution'), goalId: goal.id, amount: draft.amount, day: data.currentDay });
+      if (amount > Math.max(0, calculateBalance(data))) return { error: 'That contribution is larger than your current balance.' };
+      const alreadySaved = getGoalSavedAmount(goal, data);
+      const stillNeeded = Math.max(0, goal.targetAmount - alreadySaved);
+      if (amount > stillNeeded) return { error: `This goal needs only ${Math.round(stillNeeded)} more.` };
+      data.goalContributions.push({ id: makeId('contribution'), goalId: goal.id, amount, day: data.currentDay });
       return { data, message: `Contribution added to ${goal.title}.` };
     }
     case 'skip_commitment': {
       const item = data.commitments.find((commitment) => commitment.id === draft.targetId);
       if (!item) return { error: 'Choose a commitment to skip.' };
       if (item.paid) return { error: 'That commitment is already paid.' };
+      if (item.skipped) return { error: 'That commitment is already skipped.' };
       item.skipped = true;
       return { data, message: `${item.title} marked as skipped in the simulation.` };
+    }
+    case 'delay_commitment': {
+      const item = data.commitments.find((commitment) => commitment.id === draft.targetId);
+      if (!item) return { error: 'Choose a commitment to reschedule.' };
+      if (item.paid || item.skipped) return { error: 'Only an unpaid commitment can be rescheduled.' };
+      const newDueDay = draft.billingDay;
+      if (typeof newDueDay !== 'number' || !Number.isInteger(newDueDay) || newDueDay <= data.currentDay || newDueDay > data.profile.totalDays) {
+        return { error: `Choose a new due day between Day ${data.currentDay + 1} and Day ${data.profile.totalDays}.` };
+      }
+      item.dueDay = newDueDay;
+      return { data, message: `${item.title} rescheduled to Day ${newDueDay} in the simulation.` };
     }
     default:
       return { error: 'Choose a valid decision type.' };

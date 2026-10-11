@@ -2,12 +2,13 @@ import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 import type {
   Commitment, DecisionDraft, ExpenseEntry,
-  FinanceData, FinanceSnapshot, Goal, GoalPriority, IncomeEntry, Profile,
+  FinanceData, FinanceSnapshot, Goal, IncomeEntry, Profile,
   Subscription, UndoEntry,
 } from '../types';
-import { applyDecisionDraft, calculateBalance, calculateMetrics } from '../lib/finance';
+import { applyDecisionDraft, calculateBalance, calculateMetrics, getGoalSavedAmount } from '../lib/finance';
 import { createDemoData, createEmptyData } from '../lib/seed';
-import { makeId } from '../lib/format';
+import { makeId, safePositiveAmount, sanitizeText } from '../lib/format';
+import { sanitizeFinanceData } from '../lib/sanitize';
 
 type Theme = 'dark' | 'light';
 
@@ -101,6 +102,9 @@ const dailySpend = (data: FinanceData, day: number): number => data.expenses
   .filter((item) => item.day === day)
   .reduce((total, item) => total + item.amount, 0);
 
+const validDay = (day: unknown): day is number => typeof day === 'number' && Number.isInteger(day) && day >= 1 && day <= 30;
+const validCategory = (category: unknown): category is ExpenseEntry['category'] =>
+  ['Food', 'Travel', 'Shopping', 'Entertainment', 'Bills', 'Health', 'Education', 'Other'].includes(String(category));
 const makeHistory = (data: FinanceData): FinanceData['history'] => {
   const snapshots: FinanceData['history'] = [];
   for (let day = 1; day <= data.currentDay; day += 1) {
@@ -115,6 +119,7 @@ const makeHistory = (data: FinanceData): FinanceData['history'] => {
 const dataWithHistory = (data: FinanceData): FinanceData => ({ ...data, history: makeHistory(data) });
 
 export const useFinanceStore = create<FinanceStore>()(persist((set, get) => {
+  const invalidInput = (message: string) => set({ toastMessage: message });
   const initial = dataWithHistory(createDemoData());
 
   const recordCurrentDay = () => {
@@ -166,12 +171,13 @@ export const useFinanceStore = create<FinanceStore>()(persist((set, get) => {
     setTheme: (theme) => set({ theme }),
 
     completeOnboarding: ({ name, mode, firstGoalTitle }) => {
-      const safeName = name.trim() || 'Alex';
+      const safeName = sanitizeText(name, 32) || 'Alex';
       commit((state) => {
         const next = mode === 'demo' ? createDemoData(safeName) : createEmptyData(safeName);
-        if (firstGoalTitle?.trim()) {
+        const safeGoalTitle = sanitizeText(firstGoalTitle, 48);
+        if (safeGoalTitle) {
           next.goals.push({
-            id: makeId('goal'), title: firstGoalTitle.trim(), targetAmount: 2000, savedAmount: 0,
+            id: makeId('goal'), title: safeGoalTitle, targetAmount: 2000, savedAmount: 0,
             deadlineDay: 30, monthlyContribution: 500, priority: 'Medium',
           });
         }
@@ -182,26 +188,93 @@ export const useFinanceStore = create<FinanceStore>()(persist((set, get) => {
     skipOnboarding: () => commit(() => ({ onboardingComplete: true }), 'Welcome to Runway.', false),
 
     resetDemoData: () => {
-      const name = get().profile.name || 'Alex';
+      const name = sanitizeText(get().profile.name, 32) || 'Alex';
       commit((state) => ({ ...stateFrom(dataWithHistory(createDemoData(name))), onboardingComplete: true, theme: state.theme }), 'Demo data restored. Your previous data can be undone.');
     },
 
-    updateProfile: (patch) => commit((state) => ({ profile: { ...state.profile, ...patch } }), 'Profile updated.'),
+    updateProfile: (patch) => {
+      const cleanPatch: Partial<Profile> = { ...patch };
+      if (patch.name !== undefined) cleanPatch.name = sanitizeText(patch.name, 32) || 'Alex';
+      if (patch.startingBalance !== undefined) {
+        const amount = safePositiveAmount(patch.startingBalance);
+        if (amount === null) { invalidInput('Starting budget must be greater than ₹0 and no more than ₹1,00,00,000.'); return; }
+        cleanPatch.startingBalance = amount;
+      }
+      commit((state) => ({ profile: { ...state.profile, ...cleanPatch } }), 'Profile updated.');
+    },
 
-    addExpense: (input) => commit((state) => ({ expenses: [...state.expenses, { ...input, id: makeId('expense') }] }), `${input.title} added.`),
-    updateExpense: (id, patch) => commit((state) => ({ expenses: state.expenses.map((item) => item.id === id ? { ...item, ...patch } : item) }), 'Transaction updated.'),
+    addExpense: (input) => {
+      const title = sanitizeText(input.title, 64);
+      const amount = safePositiveAmount(input.amount);
+      if (!title || amount === null || !validDay(input.day) || !validCategory(input.category) || !['discretionary', 'unexpected'].includes(input.type)) {
+        invalidInput('Expense was not added. Check the description, amount, category and day.'); return;
+      }
+      commit((state) => ({ expenses: [...state.expenses, { ...input, title, amount, id: makeId('expense') }] }), `${title} added.`);
+    },
+    updateExpense: (id, patch) => {
+      const current = get().expenses.find((item) => item.id === id);
+      if (!current) return;
+      const candidate = { ...current, ...patch };
+      const title = sanitizeText(candidate.title, 64);
+      const amount = safePositiveAmount(candidate.amount);
+      if (!title || amount === null || !validDay(candidate.day) || !validCategory(candidate.category) || !['discretionary', 'unexpected'].includes(candidate.type)) {
+        invalidInput('Transaction was not updated. Check the description, amount, category and day.'); return;
+      }
+      commit((state) => ({ expenses: state.expenses.map((item) => item.id === id ? { ...candidate, title, amount } : item) }), 'Transaction updated.');
+    },
     deleteExpense: (id) => commit((state) => ({ expenses: state.expenses.filter((item) => item.id !== id) }), 'Transaction deleted.'),
 
-    addIncome: (input) => commit((state) => ({ incomes: [...state.incomes, { ...input, id: makeId('income') }] }), `${input.title} added as income.`),
-    updateIncome: (id, patch) => commit((state) => ({ incomes: state.incomes.map((item) => item.id === id ? { ...item, ...patch } : item) }), 'Income updated.'),
+    addIncome: (input) => {
+      const title = sanitizeText(input.title, 64);
+      const amount = safePositiveAmount(input.amount);
+      if (!title || amount === null || !validDay(input.day)) { invalidInput('Income was not added. Check the description, amount and day.'); return; }
+      commit((state) => ({ incomes: [...state.incomes, { ...input, title, amount, id: makeId('income') }] }), `${title} added as income.`);
+    },
+    updateIncome: (id, patch) => {
+      const current = get().incomes.find((item) => item.id === id);
+      if (!current) return;
+      const candidate = { ...current, ...patch };
+      const title = sanitizeText(candidate.title, 64);
+      const amount = safePositiveAmount(candidate.amount);
+      if (!title || amount === null || !validDay(candidate.day)) { invalidInput('Income was not updated. Check the description, amount and day.'); return; }
+      commit((state) => ({ incomes: state.incomes.map((item) => item.id === id ? { ...candidate, title, amount } : item) }), 'Income updated.');
+    },
     deleteIncome: (id) => commit((state) => ({ incomes: state.incomes.filter((item) => item.id !== id) }), 'Income deleted.'),
 
-    addCommitment: (input) => commit((state) => ({ commitments: [...state.commitments, { ...input, id: makeId('commitment'), paid: false, skipped: false }] }), `${input.title} added to commitments.`),
-    updateCommitment: (id, patch) => commit((state) => ({ commitments: state.commitments.map((item) => item.id === id ? { ...item, ...patch } : item) }), 'Commitment updated.'),
+    addCommitment: (input) => {
+      const title = sanitizeText(input.title, 64);
+      const amount = safePositiveAmount(input.amount);
+      if (!title || amount === null || !validDay(input.dueDay) || input.dueDay <= get().currentDay) { invalidInput('Commitment was not added. Choose a name, valid amount and future due day.'); return; }
+      commit((state) => ({ commitments: [...state.commitments, { ...input, title, amount, id: makeId('commitment'), paid: false, skipped: false }] }), `${title} added to commitments.`);
+    },
+    updateCommitment: (id, patch) => {
+      const current = get().commitments.find((item) => item.id === id);
+      if (!current) return;
+      const candidate = { ...current, ...patch };
+      const title = sanitizeText(candidate.title, 64);
+      const amount = safePositiveAmount(candidate.amount);
+      if (!title || amount === null || !validDay(candidate.dueDay) || (patch.dueDay !== undefined && !candidate.paid && !candidate.skipped && candidate.dueDay <= get().currentDay)) {
+        invalidInput('Commitment was not updated. Unpaid commitments need a future due day.'); return;
+      }
+      commit((state) => ({ commitments: state.commitments.map((item) => item.id === id ? { ...candidate, title, amount } : item) }), 'Commitment updated.');
+    },
     deleteCommitment: (id) => commit((state) => ({ commitments: state.commitments.filter((item) => item.id !== id) }), 'Commitment deleted.'),
 
-    addSubscription: (input) => commit((state) => ({ subscriptions: [...state.subscriptions, { ...input, id: makeId('subscription') }] }), `${input.name} added.`),
-    updateSubscription: (id, patch) => commit((state) => ({ subscriptions: state.subscriptions.map((item) => item.id === id ? { ...item, ...patch } : item) }), 'Subscription updated.'),
+    addSubscription: (input) => {
+      const name = sanitizeText(input.name, 64);
+      const amount = safePositiveAmount(input.amount);
+      if (!name || amount === null || !validDay(input.billingDay) || input.billingDay <= get().currentDay) { invalidInput('Subscription was not added. Choose a name, valid amount and future billing day.'); return; }
+      commit((state) => ({ subscriptions: [...state.subscriptions, { ...input, name, amount, id: makeId('subscription') }] }), `${name} added.`);
+    },
+    updateSubscription: (id, patch) => {
+      const current = get().subscriptions.find((item) => item.id === id);
+      if (!current) return;
+      const candidate = { ...current, ...patch };
+      const name = sanitizeText(candidate.name, 64);
+      const amount = safePositiveAmount(candidate.amount);
+      if (!name || amount === null || !validDay(candidate.billingDay)) { invalidInput('Subscription was not updated. Check its name, amount and billing day.'); return; }
+      commit((state) => ({ subscriptions: state.subscriptions.map((item) => item.id === id ? { ...candidate, name, amount } : item) }), 'Subscription updated.');
+    },
     toggleSubscription: (id) => {
       const item = get().subscriptions.find((subscription) => subscription.id === id);
       if (!item) return;
@@ -209,35 +282,60 @@ export const useFinanceStore = create<FinanceStore>()(persist((set, get) => {
     },
     deleteSubscription: (id) => commit((state) => ({ subscriptions: state.subscriptions.filter((item) => item.id !== id) }), 'Subscription removed. Past charges remain in your history.'),
 
-    addGoal: (input) => commit((state) => ({ goals: [...state.goals, { ...input, id: makeId('goal'), savedAmount: input.savedAmount ?? 0 }] }), `${input.title} goal created.`),
-    updateGoal: (id, patch) => commit((state) => ({ goals: state.goals.map((item) => item.id === id ? { ...item, ...patch } : item) }), 'Goal updated.'),
+    addGoal: (input) => {
+      const title = sanitizeText(input.title, 48);
+      const targetAmount = safePositiveAmount(input.targetAmount);
+      const savedAmount = input.savedAmount === undefined ? 0 : (Number.isFinite(input.savedAmount) && input.savedAmount >= 0 && input.savedAmount <= 10_000_000 ? Math.round(input.savedAmount * 100) / 100 : null);
+      const monthlyContribution = safePositiveAmount(input.monthlyContribution);
+      if (!title || targetAmount === null || savedAmount === null || monthlyContribution === null || !validDay(input.deadlineDay) || !['Low', 'Medium', 'High'].includes(input.priority)) {
+        invalidInput('Goal was not created. Check its name, target, saved amount, contribution and deadline.'); return;
+      }
+      commit((state) => ({ goals: [...state.goals, { ...input, title, targetAmount, savedAmount, monthlyContribution, id: makeId('goal') }] }), `${title} goal created.`);
+    },
+    updateGoal: (id, patch) => {
+      const current = get().goals.find((item) => item.id === id);
+      if (!current) return;
+      const candidate = { ...current, ...patch };
+      const title = sanitizeText(candidate.title, 48);
+      const targetAmount = safePositiveAmount(candidate.targetAmount);
+      const savedAmount = Number.isFinite(candidate.savedAmount) && candidate.savedAmount >= 0 && candidate.savedAmount <= 10_000_000 ? candidate.savedAmount : null;
+      const monthlyContribution = safePositiveAmount(candidate.monthlyContribution);
+      if (!title || targetAmount === null || savedAmount === null || monthlyContribution === null || !validDay(candidate.deadlineDay) || !['Low', 'Medium', 'High'].includes(candidate.priority)) {
+        invalidInput('Goal was not updated. Check its name, amounts, priority and deadline.'); return;
+      }
+      commit((state) => ({ goals: state.goals.map((item) => item.id === id ? { ...candidate, title, targetAmount, savedAmount, monthlyContribution } : item) }), 'Goal updated.');
+    },
     deleteGoal: (id) => commit((state) => ({
       goals: state.goals.filter((item) => item.id !== id),
       goalContributions: state.goalContributions.filter((item) => item.goalId !== id),
     }), 'Goal deleted. Its in-runway contributions were returned to your balance.'),
     contributeToGoal: (goalId, amount) => {
       const state = get();
-      if (!Number.isFinite(amount) || amount <= 0) return { error: 'Enter a valid contribution amount.' };
-      if (amount > Math.max(0, calculateBalance(toFinanceData(state)))) return { error: 'Contribution is larger than your available balance.' };
+      const safeAmount = safePositiveAmount(amount);
+      if (safeAmount === null) return { error: 'Enter a valid contribution amount no greater than ₹1,00,00,000.' };
+      if (safeAmount > Math.max(0, calculateBalance(toFinanceData(state)))) return { error: 'Contribution is larger than your available balance.' };
       const goal = state.goals.find((item) => item.id === goalId);
       if (!goal) return { error: 'Choose a goal first.' };
-      commit((current) => ({ goalContributions: [...current.goalContributions, { id: makeId('contribution'), goalId, amount, day: current.currentDay }] }), `Moved ${Math.round(amount)} into ${goal.title}.`);
+      const remaining = Math.max(0, goal.targetAmount - getGoalSavedAmount(goal, toFinanceData(state)));
+      if (safeAmount > remaining) return { error: `This goal needs only ${Math.round(remaining)} more.` };
+      commit((current) => ({ goalContributions: [...current.goalContributions, { id: makeId('contribution'), goalId, amount: safeAmount, day: current.currentDay }] }), `Moved ${Math.round(amount)} into ${goal.title}.`);
       return {};
     },
 
     setCurrentDay: (requestedDay) => {
-      const target = Math.max(1, Math.min(30, Math.round(requestedDay)));
       const stateNow = get();
+      const finiteDay = Number.isFinite(requestedDay) ? Math.round(requestedDay) : stateNow.currentDay;
+      const target = Math.max(1, Math.min(stateNow.profile.totalDays, finiteDay));
       if (target === stateNow.currentDay) return;
       commit((state) => {
-        let data = toFinanceData(state);
+        const data = toFinanceData(state);
         let commitments = data.commitments.map((item) => {
           if (item.autoPaidDay !== undefined && item.autoPaidDay > target) return { ...item, paid: false, autoPaidDay: undefined };
           return { ...item };
         });
-        let charges = data.subscriptionCharges.filter((charge) => charge.day <= target);
+        const charges = data.subscriptionCharges.filter((charge) => charge.day <= target);
         let history = data.history.filter((snapshot) => snapshot.day <= target);
-        let notifications: string[] = [];
+        const notifications: string[] = [];
         if (target > state.currentDay) {
           for (let day = state.currentDay + 1; day <= target; day += 1) {
             commitments = commitments.map((item) => {
@@ -273,7 +371,12 @@ export const useFinanceStore = create<FinanceStore>()(persist((set, get) => {
       }, `Timeline moved to Day ${target}.`);
     },
 
-    advanceDays: (amount) => get().setCurrentDay(Math.min(get().profile.totalDays, get().currentDay + Math.max(1, amount))),
+    advanceDays: (amount) => {
+      if (!Number.isFinite(amount)) return;
+      const state = get();
+      const increment = Math.max(1, Math.round(amount));
+      get().setCurrentDay(Math.min(state.profile.totalDays, state.currentDay + increment));
+    },
 
     applyDecision: (draft: DecisionDraft) => {
       const state = get();
@@ -295,7 +398,7 @@ export const useFinanceStore = create<FinanceStore>()(persist((set, get) => {
   };
 }, {
   name: 'runway-finance-v1',
-  version: 1,
+  version: 3,
   storage: createJSONStorage(() => safeStorage),
   partialize: (state) => ({
     profile: state.profile,
@@ -313,24 +416,27 @@ export const useFinanceStore = create<FinanceStore>()(persist((set, get) => {
   }),
   migrate: (persistedState) => {
     const saved = persistedState as Partial<FinanceStore> | undefined;
-    const data = dataWithHistory({
-      ...createDemoData(saved?.profile?.name || 'Alex'),
+    const defaults = createDemoData(sanitizeText(saved?.profile?.name, 32) || 'Alex');
+    const candidate = {
+      ...defaults,
       ...saved,
-      profile: saved?.profile ?? createDemoData().profile,
-      currentDay: saved?.currentDay ?? 7,
-      incomes: saved?.incomes ?? createDemoData().incomes,
-      expenses: saved?.expenses ?? createDemoData().expenses,
-      commitments: saved?.commitments ?? createDemoData().commitments,
-      subscriptions: saved?.subscriptions ?? createDemoData().subscriptions,
-      subscriptionCharges: saved?.subscriptionCharges ?? createDemoData().subscriptionCharges,
-      goals: saved?.goals ?? createDemoData().goals,
+      profile: { ...defaults.profile, ...(saved?.profile ?? {}) },
+      currentDay: saved?.currentDay ?? defaults.currentDay,
+      incomes: saved?.incomes ?? defaults.incomes,
+      expenses: saved?.expenses ?? defaults.expenses,
+      commitments: saved?.commitments ?? defaults.commitments,
+      subscriptions: saved?.subscriptions ?? defaults.subscriptions,
+      subscriptionCharges: saved?.subscriptionCharges ?? defaults.subscriptionCharges,
+      goals: saved?.goals ?? defaults.goals,
       goalContributions: saved?.goalContributions ?? [],
       history: saved?.history ?? [],
-    } as FinanceData);
+    } as FinanceData;
+    const cleanData = sanitizeFinanceData(candidate, defaults);
+    const data = dataWithHistory(cleanData);
     return {
       ...data,
-      theme: saved?.theme ?? preferredTheme(),
-      onboardingComplete: saved?.onboardingComplete ?? false,
+      theme: saved?.theme === 'light' || saved?.theme === 'dark' ? saved.theme : preferredTheme(),
+      onboardingComplete: saved?.onboardingComplete === true,
       undoEntry: null,
       toastMessage: null,
     } as FinanceStore;

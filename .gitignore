@@ -3,3 +3,6 @@ dist/
 .vite/
 .env*
 .DS_Store
+.test-build/
+.eslintcache
+coverage/

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Activity, ArrowLeftRight, BarChart3, CalendarDays, ChevronDown, Compass, CreditCard,
+  Activity, ArrowLeftRight, BarChart3, CalendarDays, Compass, CreditCard,
   Home, Lightbulb, Menu, Moon, MoreHorizontal, PiggyBank, RotateCcw, Sun, Wallet, X,
 } from 'lucide-react';
 import { inr } from '../lib/format';

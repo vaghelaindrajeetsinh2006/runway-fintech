@@ -106,10 +106,12 @@ export type DecisionType =
   | 'one_time_purchase'
   | 'new_subscription'
   | 'recurring_habit'
+  | 'weekly_habit'
   | 'cancel_subscription'
   | 'extra_income'
   | 'goal_contribution'
   | 'skip_commitment'
+  | 'delay_commitment'
   | 'unexpected_expense';
 
 export interface DecisionDraft {

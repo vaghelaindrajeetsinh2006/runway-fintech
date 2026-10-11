@@ -1,5 +1,4 @@
 import type { FinanceData, Goal, Profile } from '../types';
-import { makeId } from './format';
 
 export const defaultProfile: Profile = {
   name: 'Alex',
